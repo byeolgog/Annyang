@@ -173,8 +173,10 @@ def prepend_observed(forecast: pd.DataFrame, observed: dict, hours: int = 26) ->
     past = pd.DataFrame([rows[t] for t in want if t in rows], columns=COLUMNS)
     out = (pd.concat([past, forecast], ignore_index=True)
            .drop_duplicates("time", keep="last").sort_values("time").reset_index(drop=True))
-    # 빈 시간이 남으면 그 뒤부터만 사용 (줄 이동 지연특성이 어긋나지 않게)
-    gaps = out["time"].diff() != pd.Timedelta(hours=1)
+    # 지난 시간 쪽에 빈 시간이 남으면 그 뒤부터만 사용 (줄 이동 지연특성이 어긋나지 않게).
+    # 예보 쪽(미래)은 원래대로 둔다 — 먼 미래에 빈 시간이 있어도 지난 기록을 버리지 않도록.
+    head = out[out["time"] <= start]
+    gaps = head["time"].diff() != pd.Timedelta(hours=1)
     gaps.iloc[0] = False
     if gaps.any():
         out = out.loc[gaps[gaps].index[-1]:].reset_index(drop=True)

@@ -27,7 +27,7 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
@@ -58,10 +58,19 @@ jobs:
         uses: actions/deploy-pages@v4
         continue-on-error: true   # GitHub 쪽 일시 오류("No artifacts named github-pages")가 가끔 남
 
-      - name: 배포 재시도 (40초 뒤)
+      - name: 배포 재시도 대기 (90초)
         if: steps.deployment.outcome == 'failure'
-        run: sleep 40
+        run: sleep 90
 
       - id: deployment_retry
         if: steps.deployment.outcome == 'failure'
+        uses: actions/deploy-pages@v4
+        continue-on-error: true
+
+      - name: 배포 재시도 대기 (3분)
+        if: steps.deployment.outcome == 'failure' && steps.deployment_retry.outcome == 'failure'
+        run: sleep 180
+
+      - id: deployment_retry2
+        if: steps.deployment.outcome == 'failure' && steps.deployment_retry.outcome == 'failure'
         uses: actions/deploy-pages@v4
