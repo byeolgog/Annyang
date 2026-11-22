@@ -131,6 +131,57 @@ def fetch_kma_now() -> dict:
     }
 
 
+def fetch_kma_ncst_at(when: datetime) -> dict:
+    """만안구 초단기실황: 그 시각(정시)에 실제 관측한 값. 최근 약 24시간까지 조회 가능."""
+    items = _kma_call("getUltraSrtNcst", when.strftime("%Y%m%d"), when.strftime("%H00"))
+    v = {it["category"]: float(it["obsrValue"]) for it in items}
+    if "T1H" not in v:
+        raise RuntimeError(f"{when:%m-%d %H}시 초단기실황에 기온 없음")
+    return {"temp": v["T1H"], "wind": v.get("WSD", 0.0), "humidity": v.get("REH", 50.0)}
+
+
+def prepend_observed(forecast: pd.DataFrame, observed: dict, hours: int = 26) -> pd.DataFrame:
+    """지연특성용 지난 시간을 붙인다: 만안구 초단기실황 기록(observed) 우선, 빈 시간만 Open-Meteo.
+
+    observed = {"YYYY-MM-DD HH:00": {"temp", "wind", "humidity"}}.
+    학습 때 지난 24시간 자리에는 만안 AWS '관측값'이 들어갔으므로, 운영에서도 관측(초단기실황)을 쓴다.
+    미래 예보값은 그대로 두고, 결과는 빈 시간 없이 1시간 간격으로 이어지게 만든다(지연특성은 줄 이동으로 계산).
+    """
+    if forecast.empty:
+        return forecast
+    start = forecast["time"].min()
+    want = pd.date_range(start - timedelta(hours=hours), start - timedelta(hours=1), freq="h")
+    rows = {}
+    for k, v in (observed or {}).items():
+        t = pd.Timestamp(k)
+        if t in want:
+            rows[t] = {"time": t.to_pydatetime(), "temp": v["temp"], "wind": v["wind"],
+                       "humidity": v["humidity"], "pop": 0.0}
+    from_obs = set(rows)
+    missing = [t for t in want if t not in rows]
+    if missing:   # 기록이 빈 시간만 Open-Meteo로
+        try:
+            om = fetch_open_meteo()
+            om = om.set_index(pd.to_datetime(om["time"]))
+            for t in missing:
+                if t in om.index:
+                    r = om.loc[t]
+                    rows[t] = {"time": t.to_pydatetime(), "temp": float(r.temp), "wind": float(r.wind),
+                               "humidity": float(r.humidity), "pop": 0.0}
+        except Exception:
+            pass
+    past = pd.DataFrame([rows[t] for t in want if t in rows], columns=COLUMNS)
+    out = (pd.concat([past, forecast], ignore_index=True)
+           .drop_duplicates("time", keep="last").sort_values("time").reset_index(drop=True))
+    # 빈 시간이 남으면 그 뒤부터만 사용 (줄 이동 지연특성이 어긋나지 않게)
+    gaps = out["time"].diff() != pd.Timedelta(hours=1)
+    gaps.iloc[0] = False
+    if gaps.any():
+        out = out.loc[gaps[gaps].index[-1]:].reset_index(drop=True)
+    out.attrs["observed_hours"] = int(sum(t in from_obs for t in out["time"]))
+    return out
+
+
 # ---------------- 대체 소스 ----------------
 
 def fetch_open_meteo():
