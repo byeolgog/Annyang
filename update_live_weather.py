@@ -151,8 +151,16 @@ def fetch_forecast(tries: int = 3, observed: dict | None = None) -> dict:
     last = None
     for _ in range(tries):
         try:
+            # 가까운 6시간: 초단기예보(매시간 갱신)로 바꾸고, 나머지는 단기예보
+            try:
+                ultra = weather.fetch_kma_ultra()
+            except Exception:
+                ultra = None
+            near = weather.overlay_ultra(weather.fetch_kma_forecast(), ultra)
             # 지난 24시간: 만안구 초단기실황 기록 우선, 빈 시간만 Open-Meteo
-            df = weather.prepend_observed(weather.fetch_kma_forecast(), observed or {})
+            df = weather.prepend_observed(near, observed or {})
+            df.attrs["ultra_hours"] = near.attrs.get("ultra_hours", 0)
+            df.attrs["ultra_base"] = near.attrs.get("ultra_base", "")
             break
         except Exception as e:
             last = e
@@ -161,6 +169,8 @@ def fetch_forecast(tries: int = 3, observed: dict | None = None) -> dict:
     out = {
         "source": "기상청 단기예보",
         "history_source": f"지난 시간: 초단기실황 {df.attrs.get('observed_hours', 0)}시간 + 나머지 Open-Meteo",
+        "near_source": (f"가까운 {df.attrs['ultra_hours']}시간: 초단기예보 ({df.attrs.get('ultra_base', '')} 발표), 나머지 단기예보"
+                        if df.attrs.get("ultra_hours") else "초단기예보 없음 — 전부 단기예보"),
         "area": config.APP_REF_NAME,
         "hourly": [{"date": t.strftime("%Y-%m-%d"), "hour": t.hour, "temp": r.temp, "wind": r.wind,
                     "humidity": r.humidity, "pop": r.pop}
@@ -301,6 +311,7 @@ def main() -> int:
         if "hourly" in js:
             now = js.get("now")
             print(f"  {js.get('history_source', '')}")
+            print(f"  {js.get('near_source', '')}")
             print(f"  만안구 예보 {len(js['hourly'])}시간"
                   + (f", 지금 {now['time']} 기온 {now['temp']}°C" if now else f", 실황 실패: {js.get('now_error')}"))
     return 0   # 실패해도 사이트 배포는 계속 (직전 값 또는 Open-Meteo·AI 예측으로 표시)
