@@ -104,6 +104,59 @@ def fetch_kma_forecast() -> pd.DataFrame:
     return df[COLUMNS].dropna()
 
 
+def _ultra_base(now: datetime):
+    """초단기예보: 매시 30분 발표, 약 15분 뒤(45분)부터 조회 가능."""
+    t = now - timedelta(minutes=45)
+    return t.strftime("%Y%m%d"), t.strftime("%H30")
+
+
+def fetch_kma_ultra(now: datetime | None = None) -> pd.DataFrame:
+    """만안구 초단기예보: 앞으로 6시간, 1시간 간격 (기온·습도·풍속). 매시간 새로 나와 단기예보보다 최신."""
+    base_date, base_time = _ultra_base(now or kst_now())
+    items = _kma_call("getUltraSrtFcst", base_date, base_time)
+    keymap = {"T1H": "temp", "WSD": "wind", "REH": "humidity"}
+    rows = {}
+    for it in items:
+        col = keymap.get(it["category"])
+        if col:
+            t = datetime.strptime(it["fcstDate"] + it["fcstTime"], "%Y%m%d%H%M")
+            rows.setdefault(t, {"time": t})[col] = float(it["fcstValue"])
+    df = pd.DataFrame(sorted(rows.values(), key=lambda r: r["time"]))
+    df = df[["time", "temp", "wind", "humidity"]].dropna() if not df.empty else df
+    df.attrs["base"] = f"{base_date} {base_time}"
+    return df
+
+
+def overlay_ultra(forecast: pd.DataFrame, ultra: pd.DataFrame | None) -> pd.DataFrame:
+    """가까운 시간(초단기예보가 있는 최대 6시간)은 기온·습도·풍속을 초단기예보 값으로 바꾼다.
+
+    강수확률은 초단기예보에 없어서 단기예보 값을 그대로 둔다. 먼 시간은 단기예보 그대로.
+    """
+    if ultra is None or ultra.empty or forecast.empty:
+        forecast.attrs["ultra_hours"] = 0
+        return forecast
+    f = forecast.set_index("time").copy()
+    u = ultra.set_index("time")
+    common = f.index.intersection(u.index)
+    for c in ("temp", "wind", "humidity"):
+        f.loc[common, c] = u.loc[common, c]
+    out = f.reset_index()
+    out.attrs["ultra_hours"] = len(common)
+    out.attrs["ultra_base"] = ultra.attrs.get("base", "")
+    return out
+
+
+def fetch_kma_ultra_at(when: datetime) -> dict:
+    """그 시각(when, 정시)을 사이트가 직전 실행(약 17분 전)에서 받은 초단기예보로 예측한 값."""
+    df = fetch_kma_ultra(when - timedelta(minutes=17))
+    row = df[df["time"] == when]
+    if row.empty:
+        raise RuntimeError(f"{when:%m-%d %H}시가 초단기예보 {df.attrs.get('base')} 발표분에 없음")
+    r = row.iloc[0]
+    return {"temp": float(r.temp), "wind": float(r.wind), "humidity": float(r.humidity),
+            "base": f"{df.attrs.get('base')} 초단기"}
+
+
 def fetch_kma_at(when: datetime) -> dict:
     """그 시각(when, 정시)에 사이트가 쓰고 있던 만안구 예보값 {temp, wind, humidity, base}.
 
@@ -336,7 +389,10 @@ def nowcast_ref(obs_hour: dict | None) -> dict | None:
     if not obs_hour:
         return None
     t = pd.Timestamp(obs_hour["time"]).to_pydatetime()
-    fc = fetch_kma_at(t)
+    try:   # 가까운 시간은 초단기예보를 쓰므로, 오차도 그 시각에 쓰던 초단기예보 기준으로
+        fc = fetch_kma_ultra_at(t)
+    except Exception:
+        fc = fetch_kma_at(t)
     return {"time": t.strftime("%Y-%m-%d %H:%M"),
             "obs": {k: obs_hour[k] for k in ("temp", "humidity", "wind")},
             "fcst": {k: fc[k] for k in ("temp", "humidity", "wind")}, "fcst_base": fc["base"]}
