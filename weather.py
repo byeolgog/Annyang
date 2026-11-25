@@ -389,9 +389,13 @@ def nowcast_ref(obs_hour: dict | None) -> dict | None:
     if not obs_hour:
         return None
     t = pd.Timestamp(obs_hour["time"]).to_pydatetime()
-    try:   # 가까운 시간은 초단기예보를 쓰므로, 오차도 그 시각에 쓰던 초단기예보 기준으로
-        fc = fetch_kma_ultra_at(t)
-    except Exception:
+    fc = None
+    if getattr(config, "USE_ULTRA_NEAR", True):   # 가까운 시간은 초단기예보를 쓰므로, 오차도 그 시각에 쓰던 초단기예보 기준으로
+        try:
+            fc = fetch_kma_ultra_at(t)
+        except Exception:
+            fc = None
+    if fc is None:
         fc = fetch_kma_at(t)
     return {"time": t.strftime("%Y-%m-%d %H:%M"),
             "obs": {k: obs_hour[k] for k in ("temp", "humidity", "wind")},

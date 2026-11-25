@@ -111,10 +111,9 @@ def campus_predict_series(rows: list[dict]) -> list[dict]:
             sequence = raw[first:i + 1]
             if np.isfinite(sequence).all():
                 prediction[i] = base[i] + neural_delta(model, sequence)
-    return [
-        {"temp": row[0], "humidity": row[1], "wind": row[2]}
-        for row in tidy(prediction)
-    ]
+    out = [{"temp": row[0], "humidity": row[1], "wind": row[2]} for row in tidy(prediction)]
+    # 가까운 6시간: 깃허브 실행 때 초단기예보 학습 모델로 계산해 둔 값(row["campus"])을 그대로 쓴다
+    return [dict(r["campus"]) if isinstance(r.get("campus"), dict) else o for r, o in zip(rows, out)]
 
 
 def feels(month, ta, rh, ws) -> float:
@@ -134,7 +133,7 @@ def nowcast_error(nc: dict | None) -> dict | None:
         return None
     t = datetime.strptime(nc["time"], "%Y-%m-%d %H:%M")
     f, o = nc["fcst"], nc["obs"]
-    p = campus_predict(f["temp"], f["wind"], f["humidity"], t.month, t.hour)
+    p = nc.get("pred") or campus_predict(f["temp"], f["wind"], f["humidity"], t.month, t.hour)
     return {"time": t, **{k: o[k] - p[k] for k in ("temp", "humidity", "wind")}}
 
 

@@ -40,6 +40,8 @@ APP_REF_LAT = 37.39523
 APP_REF_LON = 126.89194
 
 # 기상청 단기예보 격자 좌표 (안양시 만안구)
+USE_ULTRA_NEAR = True    # 가까운 6시간에 초단기예보를 쓸지 (구버전 비교 사이트: False = 전부 단기예보)
+USE_ULTRA_MODEL = True   # 초단기예보 시간에 '초단기예보로 학습한 모델'(data/ultra_model.json)을 쓸지
 KMA_NX = 59
 KMA_NY = 123
 
