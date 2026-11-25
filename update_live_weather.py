@@ -23,6 +23,7 @@ import requests
 
 import config
 import site_model
+import ultra_model
 import weather
 
 DOCS = config.BASE_DIR / "docs"
@@ -39,13 +40,45 @@ def parse_latest(text: str) -> dict | None:
             "_hour_obs": weather.hour_obs(df)}
 
 
-def add_nowcast(data: dict) -> dict:
+def _obs_at(observed: dict | None, t) -> dict:
+    """그 정시의 만안구 관측: 쌓아 둔 초단기실황 기록에서, 없으면 기상청에 직접."""
+    v = (observed or {}).get(t.strftime("%Y-%m-%d %H:%M"))
+    return v if v else weather.fetch_kma_ncst_at(t)
+
+
+def _use_ultra_model() -> bool:
+    return getattr(config, "USE_ULTRA_NEAR", True) and getattr(config, "USE_ULTRA_MODEL", True) \
+        and ultra_model.PATH.exists()
+
+
+def ultra_campus(ultra, observed: dict | None) -> dict:
+    """초단기예보 각 시각 → 초단기예보 학습 모델의 안양대 예측 {datetime: {temp, humidity, wind}}."""
+    if ultra is None or ultra.empty or not _use_ultra_model():
+        return {}
+    issue = ultra_model.issue_hour(ultra.attrs["base"])
+    obs = _obs_at(observed, issue)
+    return {r.time.to_pydatetime(): ultra_model.predict(
+                {"temp": r.temp, "humidity": r.humidity, "wind": r.wind}, r.time.to_pydatetime(), issue, obs)
+            for r in ultra.itertuples(index=False)}
+
+
+def add_nowcast(data: dict, observed: dict | None = None) -> dict:
     """정시 실측 시각의 만안구 예보를 붙인다. 실패해도 실측값은 그대로 (보정만 생략)."""
     obs = data.pop("_hour_obs", None)
     for _ in range(3):
         try:
             ref = weather.nowcast_ref(obs)
             if ref:
+                # 그 시각을 초단기예보로 예측했으면, 오차 기준도 초단기예보 학습 모델의 예측으로
+                if ref.get("fcst_base", "").endswith("초단기") and _use_ultra_model():
+                    try:
+                        from datetime import datetime
+                        issue = ultra_model.issue_hour(ref["fcst_base"])
+                        t = datetime.strptime(ref["time"], "%Y-%m-%d %H:%M")
+                        ref["pred"] = ultra_model.predict(ref["fcst"], t, issue, _obs_at(observed, issue))
+                        ref["pred_model"] = "초단기예보 학습 모델"
+                    except Exception as e:
+                        ref["pred_error"] = f"{type(e).__name__} {e}"
                 data["nowcast"] = ref
             else:
                 data["nowcast_error"] = "최근 1시간에 정시 실측이 없음"
@@ -74,7 +107,7 @@ def _grid(key: str, tm1, tm2, itv: int, tries: int = 3):
     raise RuntimeError(f"{tries}번 시도 모두 실패: {type(last).__name__} {last}")
 
 
-def fetch_campus(key: str) -> dict:
+def fetch_campus(key: str, observed: dict | None = None) -> dict:
     """최근 5시간 정시 실측(놓친 시간 채우기용) + 최근 10분 간격 실측(지금 값).
 
     '최근 1시간' 조회(시각 미지정)가 504로 막히는 때가 있어, 코랩 수집 때처럼 시각을 직접 지정한다.
@@ -112,7 +145,7 @@ def fetch_campus(key: str) -> dict:
                                 for h in hourly.itertuples() if h.time.minute == 0]
     if errs:
         data["partial_error"] = " / ".join(errs)
-    return add_nowcast(data)
+    return add_nowcast(data, observed)
 
 
 def update_manan_obs(stamp: str) -> dict:
@@ -152,11 +185,17 @@ def fetch_forecast(tries: int = 3, observed: dict | None = None) -> dict:
     for _ in range(tries):
         try:
             # 가까운 6시간: 초단기예보(매시간 갱신)로 바꾸고, 나머지는 단기예보
-            try:
-                ultra = weather.fetch_kma_ultra()
-            except Exception:
-                ultra = None
+            ultra = None
+            if getattr(config, "USE_ULTRA_NEAR", True):
+                try:
+                    ultra = weather.fetch_kma_ultra()
+                except Exception:
+                    ultra = None
             near = weather.overlay_ultra(weather.fetch_kma_forecast(), ultra)
+            try:   # 가까운 6시간: 초단기예보로 학습한 모델의 안양대 예측 (실패하면 지금 모델로)
+                campus_near, campus_err = ultra_campus(ultra, observed), None
+            except Exception as e:
+                campus_near, campus_err = {}, f"{type(e).__name__} {e}"
             # 지난 24시간: 만안구 초단기실황 기록 우선, 빈 시간만 Open-Meteo
             df = weather.prepend_observed(near, observed or {})
             df.attrs["ultra_hours"] = near.attrs.get("ultra_hours", 0)
@@ -171,11 +210,16 @@ def fetch_forecast(tries: int = 3, observed: dict | None = None) -> dict:
         "history_source": f"지난 시간: 초단기실황 {df.attrs.get('observed_hours', 0)}시간 + 나머지 Open-Meteo",
         "near_source": (f"가까운 {df.attrs['ultra_hours']}시간: 초단기예보 ({df.attrs.get('ultra_base', '')} 발표), 나머지 단기예보"
                         if df.attrs.get("ultra_hours") else "초단기예보 없음 — 전부 단기예보"),
+        "near_model": (f"가까운 {len(campus_near)}시간: 초단기예보 학습 모델, 나머지: 지금 모델(LightGBM + 지연특성)"
+                       if campus_near else "전부 지금 모델(LightGBM + 지연특성)"),
         "area": config.APP_REF_NAME,
         "hourly": [{"date": t.strftime("%Y-%m-%d"), "hour": t.hour, "temp": r.temp, "wind": r.wind,
-                    "humidity": r.humidity, "pop": r.pop}
+                    "humidity": r.humidity, "pop": r.pop,
+                    **({"campus": campus_near[t.to_pydatetime()]} if t.to_pydatetime() in campus_near else {})}
                    for t, r in zip(df["time"], df.itertuples(index=False))],
     }
+    if campus_err:
+        out["near_model_error"] = campus_err
     try:
         now = weather.fetch_kma_now()
         out["now"] = {"time": now["time"].strftime("%Y-%m-%d %H:%M"), "temp": now["temp"],
@@ -277,7 +321,7 @@ def main() -> int:
     def campus():
         if not key:
             raise RuntimeError("KMA_APIHUB_KEY 비밀값이 없음")
-        return fetch_campus(key)
+        return fetch_campus(key, observed)
 
     observed = {}
     if key or os.environ.get("KMA_API_KEY"):

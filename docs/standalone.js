@@ -198,6 +198,7 @@ const Standalone = (() => {
   function applyCampusSeries(rows) {
     for (let i = 0; i < rows.length; i++) {
       const r = rows[i], month = +r.date.slice(5, 7);
+      if (r.campus) { r._campus = { ...r.campus }; continue; }   // 가까운 6시간: 초단기예보 학습 모델 값(깃허브에서 계산)
       if (CM_KIND === "rf") {
         r._campus = campusPredict(r.temp, r.wind, r.humidity, month, r.hour);
         continue;
@@ -223,7 +224,7 @@ const Standalone = (() => {
   function nowcastError(nc) {
     if (!nc || !nc.obs || !nc.fcst || hoursAgo(nc.time) > 12) return null;
     const date = nc.time.slice(0, 10), hour = +nc.time.slice(11, 13);
-    const p = campusPredict(nc.fcst.temp, nc.fcst.wind, nc.fcst.humidity, +date.slice(5, 7), hour);
+    const p = nc.pred || campusPredict(nc.fcst.temp, nc.fcst.wind, nc.fcst.humidity, +date.slice(5, 7), hour);
     return { date, hour, temp: nc.obs.temp - p.temp, humidity: nc.obs.humidity - p.humidity,
              wind: nc.obs.wind - p.wind };
   }
