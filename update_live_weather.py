@@ -220,6 +220,11 @@ def fetch_forecast(tries: int = 3, observed: dict | None = None) -> dict:
     }
     if campus_err:
         out["near_model_error"] = campus_err
+    print(f"  {out['near_model']}" + (f" (새 모델 실패: {campus_err})" if campus_err else ""))
+    for r in out["hourly"]:
+        if "campus" in r:
+            c = r["campus"]
+            print(f"    {r['date'][5:]} {r['hour']:02d}시 예보 {r['temp']}°C → 안양대 {c['temp']}°C, 습도 {c['humidity']}%, 풍속 {c['wind']}m/s")
     try:
         now = weather.fetch_kma_now()
         out["now"] = {"time": now["time"].strftime("%Y-%m-%d %H:%M"), "temp": now["temp"],
