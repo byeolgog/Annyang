@@ -445,7 +445,7 @@ const Standalone = (() => {
   async function analyze({ day, schedule, sensitivity }) {
     const f = await forecast(), now = kstNow();
     const target = day === "오늘" ? now.date : addDays(now.date, 1);
-    const [sh, eh] = C.schedules[schedule] || [9, 18];
+    const [sh, eh] = C.schedules[schedule] || [12, 18];
     let sel = f.hourly.filter((r) => r.date === target && r.hour >= sh && r.hour <= eh);
     if (day === "오늘") sel = sel.filter((r) => r.hour >= now.hour);
     if (!sel.length) return { error: "선택한 시간대의 예보가 없어요. 오늘 일정이 이미 끝났다면 '내일'을 선택하세요." };
