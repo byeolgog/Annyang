@@ -153,6 +153,17 @@
   .modal-bg.show { display: grid; }
   .modal { background: #fff; border-radius: 18px; padding: 28px; width: 100%; max-width: 440px; }
   .modal h3 { font-size: 18px; margin-bottom: 4px; }
+  .hist-list { max-height: 56vh; overflow-y: auto; margin: 0 -4px 16px; padding: 0 4px; }
+  .hrow { border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; margin-bottom: 10px; }
+  .hrow .hmeta { display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: var(--sub); margin-bottom: 8px; }
+  .hrow select { margin-bottom: 8px; }
+  .hrow .pill { padding: 6px 12px; font-size: 12px; }
+  .hrow .heff { font-size: 12px; margin-top: 8px; color: var(--blue); }
+  .hrow .heff.off { color: var(--faint); }
+  .hdel { font-size: 12px; color: #dc2626; padding: 2px 6px; }
+  .hdel.confirm { font-weight: 700; }
+  .hist-sum { background: #f3f6fb; border-radius: 10px; padding: 10px 14px; font-size: 13px; margin-bottom: 14px; }
+  .linkish { font-size: 13px; color: var(--blue); text-decoration: underline; margin-top: 8px; }
   .modal select { width: 100%; padding: 11px 12px; border-radius: 10px; border: 1px solid var(--line); font: inherit; font-size: 14px; }
   .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: #111827; color: #fff; padding: 12px 20px; border-radius: 12px; font-size: 14px; opacity: 0; transition: .3s; pointer-events: none; z-index: 60; }
   .toast.show { opacity: 1; }
@@ -216,7 +227,7 @@
         </div>
         <div class="features">
           <div class="feature"><div class="ic">🤖</div><b>AI 캠퍼스 보정</b><span>3년치 기상 데이터 학습</span></div>
-          <div class="feature"><div class="ic">🙋</div><b>학생 실시간 제보</b><span>지금 캠퍼스 체감 공유</span></div>
+          <div class="feature"><div class="ic">🙋</div><b>내 체감 제보</b><span>제보할수록 나에게 맞춰져요</span></div>
           <div class="feature"><div class="ic">🧥</div><b>옷차림 추천</b><span>내 일정에 딱 맞게</span></div>
         </div>
       </div>
@@ -240,6 +251,7 @@
         <h3>🙋 지금 캠퍼스 학생들의 체감</h3>
         <div id="statBars"></div>
         <div class="muted" id="statFoot"></div>
+        <button class="linkish" data-open-history>내 제보 기록 보기 · 수정</button>
       </div>
     </div>
   </section>
@@ -260,7 +272,7 @@
           <div class="it"><div class="ic">🌤️</div><div><b>기상청 날씨</b><span id="dSource">기온 · 풍속 · 습도 · 강수확률</span></div></div>
           <div class="it"><div class="ic">🤖</div><div><b>캠퍼스 AI 모델</b><span id="dTerrain">만안 ↔ 안양대 날씨 학습</span></div></div>
           <div class="it"><div class="ic">📡</div><div><b>캠퍼스 실측</b><span id="dBuilding">안양대 500m 격자 (기상청)</span></div></div>
-          <div class="it"><div class="ic">🙋</div><div><b>학생 체감 제보</b><span id="dReports">오늘 들어온 제보</span></div></div>
+          <div class="it"><div class="ic">🙋</div><div><b>내 체감 제보</b><span id="dReports">이 기기의 제보</span></div></div>
         </div>
         <div class="card">
           <h3>💬 실시간 체감 제보</h3>
@@ -319,7 +331,7 @@
 <div class="modal-bg" id="reportModal">
   <div class="modal">
     <h3>지금 캠퍼스 체감 제보</h3>
-    <p class="muted" style="margin-bottom:20px">익명으로 저장돼요. 제보가 쌓이면 AI가 안양대 학생 체감에 맞춰져요.</p>
+    <p class="muted" style="margin-bottom:20px">이 기기에만 저장돼요. 추천대로 입었는데 춥거나 더웠다면, 다음 추천부터 나에게 맞춰 보정해요.</p>
     <div class="field">
       <div class="field-label">지금 입은 옷은 어느 쪽에 가까워요?</div>
       <select id="wornSelect"></select>
@@ -331,6 +343,20 @@
     <div class="btn-row" style="margin-bottom:0">
       <button class="btn outline" id="reportCancel">취소</button>
       <button class="btn fill" id="reportSubmit">제보하기</button>
+    </div>
+    <button class="linkish" data-open-history>내 제보 기록 보기 · 수정</button>
+  </div>
+</div>
+
+<!-- 내 제보 기록 모달 -->
+<div class="modal-bg" id="historyModal">
+  <div class="modal">
+    <h3>내 제보 기록</h3>
+    <p class="muted" style="margin-bottom:12px">잘못 누른 제보는 고치거나 지울 수 있어요. 바뀐 기록대로 다음 추천에 반영돼요.</p>
+    <div class="hist-sum" id="histSum"></div>
+    <div class="hist-list" id="histList"></div>
+    <div class="btn-row" style="margin-bottom:0">
+      <button class="btn fill" id="historyClose" style="grid-column:1/-1">닫기</button>
     </div>
   </div>
 </div>
@@ -358,6 +384,9 @@ const api = {
   async home() { return (await this.detect()) ? (await fetch("/api/home")).json() : Standalone.home(); },
   async analyze(b) { return (await this.detect()) ? this.post("/api/analyze", b) : Standalone.analyze(b); },
   async feedback(b) { return (await this.detect()) ? this.post("/api/feedback", b) : Standalone.feedback(b); },
+  myReports() { return Standalone.myReports(); },
+  editReport(id, patch) { return Standalone.editReport(id, patch); },
+  deleteReport(id) { return Standalone.deleteReport(id); },
   async products(item) {
     return (await this.detect())
       ? (await fetch("/api/products?item=" + encodeURIComponent(item))).json()
@@ -413,14 +442,16 @@ function renderStats(stats) {
       <div class="bar"><i style="width:${stats.pct[k]}%;background:${colors[k]}"></i></div>
       <span class="pct">${stats.pct[k]}%</span></div>`).join("");
   $("statFoot").textContent = stats.local
-    ? (stats.total ? `이 기기에서 오늘 ${stats.total}건 제보했어요 (체험판은 기기별 저장)` : "체험판에서는 제보가 이 기기에만 저장돼요.")
+    ? (stats.total ? `이 기기에서 오늘 ${stats.total}건 제보했어요` : "제보는 이 기기에만 저장돼요.")
+      + (stats.mine && stats.mine.n ? ` · 내 보정 ${mineText(stats.mine.off)} (기록 ${stats.mine.n}건 반영)` : "")
     : stats.total
     ? `오늘 학생 ${stats.total}명이 체감 제보에 참여했어요`
     : "오늘은 아직 제보가 없어요. 첫 제보를 남겨 주세요!";
   $("recent").innerHTML = stats.recent.length
     ? stats.recent.map((r) => `<div class="quote">"${esc(r.text)}" <small>· ${esc(r.ago)}</small></div>`).join("")
     : `<div class="muted">아직 들어온 제보가 없어요.</div>`;
-  $("dReports").textContent = `오늘 ${stats.total}건`;
+  $("dReports").textContent = stats.mine && stats.mine.n
+    ? `기록 ${stats.mine.n}건 반영 · 내 보정 ${mineText(stats.mine.off)}` : `오늘 ${stats.total}건 · 아직 보정 없음`;
 }
 
 async function loadHome() {
@@ -462,7 +493,7 @@ const STEP_DEFS = [
   ["campus", "AI가 캠퍼스 기온·습도 예측"],
   ["wind", "AI가 캠퍼스 바람 예측"],
   ["nowcast", "오늘 캠퍼스 실측 반영"],
-  ["feedback", "학생 실시간 체감 제보 학습"],
+  ["feedback", "내 체감 제보 기록 반영"],
   ["sensitivity", "내 일정·추위 민감도로 맞춤 보정"],
 ];
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -522,11 +553,12 @@ function renderResult(d) {
   const fmt = (v) => (v > 0 ? "+" : v < 0 ? "−" : "±") + Math.abs(v).toFixed(1) + "°";
   $("rWhy").textContent = `날씨앱 체감 ${f1(r.app)}° → 캠퍼스 기온·습도 ${fmt(r.campus)} · 바람 ${fmt(r.wind)}`
     + (r.nowcast ? ` · 오늘 실측 반영 ${fmt(r.nowcast)}` : "") + ` · 민감도 ${fmt(r.sensitivity)}`
+    + (r.mine_n ? ` · 내 제보 ${fmt(r.mine)}` : "")
     + (r.range ? ` · 바람이 1.3m/s 기준선 근처라 ${r.range[0]}°~${r.range[1]}°까지 느껴질 수 있어요` : "");
   $("rComment").textContent = r.comment;
   $("rTip").textContent = r.tip;
   renderNotice(d);
-  $("rBasis").textContent = `근거: ${d.source} · 캠퍼스 ${r.basis || "AI 예측"} · 학생 제보 ${r.feedback_total}건 · 옷차림 ${r.model}`;
+  $("rBasis").textContent = `근거: ${d.source} · 캠퍼스 ${r.basis || "AI 예측"} · ${r.mine_n !== undefined ? (r.mine_n ? `내 제보 ${r.mine_n}건 반영` : "내 제보 없음") : `학생 제보 ${r.feedback_total}건`} · 옷차림 ${r.model}`;
   $("rLevel").textContent = `· ${r.level_name}`;
   // 카테고리별 칸: 대표 아이템(첫 번째) 크게 + 나머지는 '또는'으로
   $("rOutfits").innerHTML = r.categories.map((c) => {
@@ -586,9 +618,59 @@ function openReport() {
 async function submitReport() {
   $("reportModal").classList.remove("show");
   try {
-    renderStats(await api.feedback({ worn_level: +$("wornSelect").value, feedback: state.feedback, sensitivity: state.sensitivity }));
+    renderStats(await api.feedback({ worn_level: +$("wornSelect").value, feedback: state.feedback, sensitivity: state.sensitivity,
+                                     rec_level: state.result ? state.result.result.level : null }));
   } catch { toast("제보 저장에 실패했어요"); return; }
-  toast("제보 고마워요! 🙌");
+  toast("제보 고마워요! 다음 추천부터 반영돼요 🙌");
+}
+
+// ---------- 내 제보 기록 (보기·수정·삭제) ----------
+function mineText(v) {
+  return Math.abs(v) < 0.05 ? "±0.0°" : `${v > 0 ? "+" : "−"}${Math.abs(v).toFixed(1)}°`
+    + (v < 0 ? " (더 춥게)" : " (덜 춥게)");
+}
+function levelName(lv) {
+  const l = state.home && state.home.levels.find((x) => x.level === lv);
+  return l ? l.name : `${lv}단계`;
+}
+function renderHistory(d) {
+  const m = d.mine;
+  $("histSum").innerHTML = m.n
+    ? `지금 내 보정: <b>${mineText(m.off)}</b> · 기록 ${m.n}건 반영 (최근 30일, 최근 것일수록 크게)`
+    : "아직 반영된 기록이 없어요. 추천대로 입고 춥거나 더웠을 때 제보하면 보정돼요.";
+  const days = ["일", "월", "화", "수", "목", "금", "토"];
+  const dlabel = (s) => { const t = new Date(s + "T00:00:00"); return `${+s.slice(5, 7)}/${+s.slice(8, 10)} (${days[t.getDay()]})`; };
+  const levels = (state.home && state.home.levels) || [];
+  $("histList").innerHTML = d.items.length ? d.items.map((r) => `
+    <div class="hrow" data-id="${esc(r.id)}">
+      <div class="hmeta"><span>${esc(dlabel(r.date))} ${r.hour}시 · 그때 추천: ${r.rec_level === null ? "없음" : esc(levelName(r.rec_level))}</span>
+        <button class="hdel">삭제</button></div>
+      <select class="hworn">${levels.map((l) =>
+        `<option value="${l.level}"${l.level === r.worn_level ? " selected" : ""}>입은 옷: ${esc(l.name)} — ${esc(l.items.slice(0, 2).join(", "))}</option>`).join("")}</select>
+      <div class="pills">${["추워요", "적당해요", "더워요"].map((f) =>
+        `<button class="pill${f === r.feedback ? " on" : ""}" data-fb="${f}">${f}</button>`).join("")}</div>
+      <div class="heff${r.effect.startsWith("제외") ? " off" : ""}">${esc(r.effect)}</div>
+    </div>`).join("") : `<div class="muted">아직 제보 기록이 없어요.</div>`;
+  $("histList").querySelectorAll(".hrow").forEach((row) => {
+    const id = row.dataset.id;
+    row.querySelector(".hworn").onchange = (e) => afterHistory(api.editReport(id, { worn_level: +e.target.value }));
+    row.querySelectorAll("[data-fb]").forEach((b) => (b.onclick = () => afterHistory(api.editReport(id, { feedback: b.dataset.fb }))));
+    const del = row.querySelector(".hdel");
+    del.onclick = () => {
+      if (!del.classList.contains("confirm")) { del.classList.add("confirm"); del.textContent = "한 번 더 누르면 삭제"; return; }
+      afterHistory(api.deleteReport(id));
+      toast("제보를 지웠어요");
+    };
+  });
+}
+function afterHistory(d) {
+  renderHistory(d);
+  renderStats(Standalone.stats());
+}
+function openHistory() {
+  $("reportModal").classList.remove("show");
+  renderHistory(api.myReports());
+  $("historyModal").classList.add("show");
 }
 
 // ---------- 하교 시간 알림 (이 페이지가 열려 있는 동안) ----------
@@ -615,6 +697,9 @@ $("reportCancel").onclick = () => $("reportModal").classList.remove("show");
 $("reportSubmit").onclick = submitReport;
 $("reportModal").onclick = (e) => { if (e.target.id === "reportModal") $("reportModal").classList.remove("show"); };
 document.querySelectorAll("[data-open-report]").forEach((b) => (b.onclick = openReport));
+document.querySelectorAll("[data-open-history]").forEach((b) => (b.onclick = openHistory));
+$("historyClose").onclick = () => $("historyModal").classList.remove("show");
+$("historyModal").onclick = (e) => { if (e.target.id === "historyModal") $("historyModal").classList.remove("show"); };
 document.querySelectorAll("[data-nav]").forEach((b) => (b.onclick = () => {
   const n = b.dataset.nav;
   if (n === "home") { loadHome(); show("home"); }

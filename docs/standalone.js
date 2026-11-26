@@ -233,7 +233,7 @@ const Standalone = (() => {
     const lead = (Date.parse(date + "T00:00:00Z") - Date.parse(err.date + "T00:00:00Z")) / 3600000 + hour - err.hour;
     return Math.exp(-Math.max(0, lead) / NOWCAST_TAU);
   }
-  function campusFeel(t, w, rh, month, hour, sens, err = null, date = null, predicted = null) {
+  function campusFeel(t, w, rh, month, hour, sens, err = null, date = null, predicted = null, mine = 0) {
     const b = predicted || campusPredict(t, w, rh, month, hour); // 반영 전 AI 예측
     const k = err && date ? nowcastWeight(err, date, hour) : 0;   // 오늘 실측 반영 가중치
     const c = k ? { temp: b.temp + k * err.temp,
@@ -248,10 +248,10 @@ const Standalone = (() => {
       const a = feelsLike(c.temp, 1.6, c.humidity, month), bb = feelsLike(c.temp, 1.0, c.humidity, month);
       low = Math.min(a, bb, f); high = Math.max(a, bb, f);
     }
-    const s = C.sensitivity[sens] ?? 0;
+    const s = C.sensitivity[sens] ?? 0, p = s + mine;
     return { app: t, appFeels, campusTemp: c.temp, campusHum: c.humidity, campusWind: c.wind,
-             feels: f, personal: f + s, low: low + s, high: high + s,
-             climate: mid - appFeels, wind: base - mid, nowcast: f - base, nowcastW: k, sens: s };
+             feels: f, personal: f + p, low: low + p, high: high + p,
+             climate: mid - appFeels, wind: base - mid, nowcast: f - base, nowcastW: k, sens: s, mine };
   }
 
   // ---------- AI 모델 (Random Forest 추론) ----------
@@ -316,7 +316,47 @@ const Standalone = (() => {
 
   // ---------- 체감 제보 (이 기기 브라우저에만 저장) ----------
   function readFb() {
-    try { return JSON.parse(localStorage.getItem(FB_KEY) || "[]"); } catch { return []; }
+    let fb;
+    try { fb = JSON.parse(localStorage.getItem(FB_KEY) || "[]"); } catch { fb = []; }
+    if (!Array.isArray(fb)) fb = [];
+    let changed = false;
+    fb.forEach((r, i) => { if (!r.id) { r.id = `${r.at || 0}-${i}`; changed = true; } });
+    if (changed) writeFb(fb);
+    return fb;
+  }
+  function writeFb(fb) {
+    try { localStorage.setItem(FB_KEY, JSON.stringify(fb.slice(-200))); } catch {}
+  }
+
+  // 내 제보 기록 → 내 체감 보정(°C). 기록을 고치거나 지우면 바로 다시 계산된다.
+  //  · 추천대로(또는 더 두껍게) 입었는데 추웠다 → 나는 더 춥게 느끼는 편 → 체감을 낮춤(−)
+  //  · 추천대로(또는 더 얇게) 입었는데 더웠다 → 덜 춥게 느끼는 편 → 체감을 올림(+)
+  //  · 적당했다 → 지금 보정 유지 쪽으로 / 추천보다 얇게 입고 추웠다 등 옷 탓은 세지 않음
+  //  · 최근 30일만, 2주마다 무게 절반. 제보가 적으면 작게(최대 ±4°C)
+  const MINE_DAYS = 30, MINE_HALF = 14, MINE_MAX = 4;
+  function judge(r, now = Date.now()) {
+    const days = (now - (r.at || 0)) / 86400000;
+    if (days > MINE_DAYS) return { v: null, label: `제외: ${MINE_DAYS}일 지남` };
+    const rec = r.rec_level ?? r.worn_level, w = Math.pow(0.5, days / MINE_HALF);
+    if (r.feedback === "적당해요") return { v: 0, w, label: "반영: 지금 보정 유지" };
+    if (r.feedback === "추워요")
+      return r.worn_level >= rec ? { v: -1, w, label: "반영: 더 춥게 느끼는 편" }
+                                 : { v: null, label: "제외: 추천보다 얇게 입음" };
+    if (r.feedback === "더워요")
+      return r.worn_level <= rec ? { v: 1, w, label: "반영: 덜 춥게 느끼는 편" }
+                                 : { v: null, label: "제외: 추천보다 두껍게 입음" };
+    return { v: null, label: "제외" };
+  }
+  function myOffset(fb = readFb()) {
+    const now = Date.now();
+    let s = 0, w = 0, n = 0;
+    for (const r of fb) {
+      const j = judge(r, now);
+      if (j.v === null) continue;
+      s += j.w * j.v; w += j.w; n++;
+    }
+    const off = Math.max(-MINE_MAX, Math.min(MINE_MAX, (3 * s) / (w + 2)));
+    return { off: Math.abs(off) < 0.05 ? 0 : off, n };
   }
   function stats() {
     const today = kstNow().date;
@@ -329,7 +369,7 @@ const Standalone = (() => {
       return { text: `${top} 입었는데 ${r.feedback}`,
                ago: mins < 1 ? "방금" : mins < 60 ? `${mins}분 전` : `${Math.floor(mins / 60)}시간 전` };
     });
-    return { total, counts, recent, local: true,
+    return { total, counts, recent, local: true, mine: myOffset(), all: readFb().length,
              pct: Object.fromEntries(choices.map((c) => [c, total ? Math.round(100 * counts[c] / total) : 0])) };
   }
 
@@ -413,8 +453,9 @@ const Standalone = (() => {
     const sensCode = Object.keys(C.sensitivity).indexOf(sensitivity);
     const month = +target.slice(5, 7);
     const err = f.source.startsWith("기상청") ? nowcastError((await liveCampus())?.nowcast) : null;
+    const mine = myOffset();
     const hours = sel.map((r) => {
-      const cf = campusFeel(r.temp, r.wind, r.humidity, month, r.hour, sensitivity, err, target, r._campus);
+      const cf = campusFeel(r.temp, r.wind, r.humidity, month, r.hour, sensitivity, err, target, r._campus, mine.off);
       const x = [cf.campusTemp, cf.campusWind, cf.campusHum, cf.personal, r.hour, month, sensCode, r.pop];
       return { hour: r.hour, app: r.temp, wind: r.wind, pop: r.pop, feels: cf.personal, level: predict(x), cf };
     });
@@ -455,7 +496,7 @@ const Standalone = (() => {
         weather: `${Math.round(hours[0].app)}° · ${hours[0].wind.toFixed(1)}m/s`,
         campus: sgn(cf.climate), wind: sgn(cf.wind),
         nowcast: err ? `${err.hour}시 실측 ${sgn(cf.nowcast)}` : "실측 없음",
-        feedback: `${st.total}건 반영`, sensitivity: sgn(cf.sens),
+        feedback: mine.n ? `내 제보 ${mine.n}건 ${sgn(mine.off)}` : "내 제보 없음", sensitivity: sgn(cf.sens),
       },
       result: {
         hour: worst.hour, feels: +cf.personal.toFixed(1), app: +cf.appFeels.toFixed(1), diff,
@@ -468,17 +509,44 @@ const Standalone = (() => {
           name, emoji: C.category_emoji[name],
           items: items.map((i) => ({ name: i, emoji: C.item_emoji[i] || "👕" })) })),
         comment, tip, model: `${CM.name || "캠퍼스 AI"} (2024 검증 선택)`, feedback_total: st.total,
+        mine: +mine.off.toFixed(1), mine_n: mine.n,
       },
       hourly: chart.map((h) => ({ hour: h.hour, app: +h.app.toFixed(1), feels: +h.feels.toFixed(1) })),
       warning, stats: st,
     };
   }
 
-  async function feedback({ worn_level, feedback }) {
-    const fb = readFb();
-    fb.push({ worn_level, feedback, date: kstNow().date, at: Date.now() });
-    try { localStorage.setItem(FB_KEY, JSON.stringify(fb.slice(-200))); } catch {}
+  async function feedback({ worn_level, feedback, rec_level = null }) {
+    const fb = readFb(), now = kstNow(), at = Date.now();
+    fb.push({ id: `${at}-${Math.random().toString(36).slice(2, 7)}`, worn_level, feedback, rec_level,
+              date: now.date, hour: now.hour, at });
+    writeFb(fb);
     return stats();
+  }
+
+  // 내 제보 기록 (최신순) + 기록마다 보정에 어떻게 들어갔는지
+  function myReports() {
+    const fb = readFb(), now = Date.now();
+    return {
+      mine: myOffset(fb),
+      items: fb.slice().reverse().map((r) => ({
+        id: r.id, date: r.date, hour: r.hour ?? new Date(r.at + 9 * 3600000).getUTCHours(),
+        worn_level: r.worn_level, rec_level: r.rec_level ?? null, feedback: r.feedback,
+        effect: judge(r, now).label })),
+    };
+  }
+  function editReport(id, patch) {
+    const fb = readFb(), r = fb.find((x) => x.id === id);
+    if (r) {
+      if (patch.worn_level !== undefined) r.worn_level = +patch.worn_level;
+      if (patch.feedback !== undefined) r.feedback = patch.feedback;
+      writeFb(fb);
+    }
+    return myReports();
+  }
+  function deleteReport(id) {
+    writeFb(readFb().filter((x) => x.id !== id));
+    return myReports();
   }
 
   async function products(item) {
@@ -487,5 +555,5 @@ const Standalone = (() => {
     return { products: [], links };
   }
 
-  return { home, analyze, feedback, products, _neuralDelta: neuralDelta };
+  return { home, analyze, feedback, products, myReports, editReport, deleteReport, stats, _neuralDelta: neuralDelta };
 })();
