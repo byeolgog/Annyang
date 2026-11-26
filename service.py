@@ -194,7 +194,7 @@ def _ai_comment(app_t, feels_t, worst_hour, cats, hourly):
 def analyze(day: str, schedule: str, sensitivity: str) -> dict:
     fc = forecast()
     target = date.today() + timedelta(days=0 if day == "오늘" else 1)
-    start_h, end_h = config.SCHEDULE_PRESETS.get(schedule, (9, 18))
+    start_h, end_h = config.SCHEDULE_PRESETS.get(schedule, (12, 18))
 
     h = fc.hourly
     h = h.sort_values("time").reset_index(drop=True)
