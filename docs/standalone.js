@@ -482,7 +482,9 @@ const Standalone = (() => {
       : diff <= -1 ? `오늘 캠퍼스는 날씨앱보다 ${-diff}° 덜 춥게 느껴져요. ` : "오늘 캠퍼스 체감은 날씨앱과 비슷해요. ";
     const comment = `${head}${worst.hour}시가 체감 ${Math.round(cf.personal)}°로 가장 추우니 ${cats["상의"][0]}에 ${cats["의류 잡화"][0]}까지 챙기세요.`;
 
-    const chart = hours.length <= 6 ? hours : hours.filter((_, i) => i % 3 === 0 || i === hours.length - 1);
+    // 막대는 4~5개 정도: 6시간 이하는 전부, 더 길면 간격을 넓혀서 (12~18시 → 12·14·16·18시)
+    const step = hours.length <= 6 ? 1 : Math.ceil((hours.length - 1) / 4);
+    const chart = hours.filter((_, i) => i % step === 0 || i === hours.length - 1);
     const minFeels = Math.min(...hours.map((h) => h.feels));
     const last = hours[hours.length - 1];
     const warning = hours.length >= 2 && last.feels <= minFeels && hours[0].feels - last.feels >= 3
