@@ -293,8 +293,7 @@
           <div class="why" id="rWhy"></div>
         </div>
         <div class="btn-row">
-          <button class="btn outline" data-open-report>체감 제보하기</button>
-          <button class="btn fill" id="alarmBtn">하교 시간 알림 받기</button>
+          <button class="btn outline" data-open-report style="grid-column:1/-1">체감 제보하기</button>
         </div>
         <div class="card">
           <h3>🤖 AI 한마디</h3>
@@ -673,26 +672,9 @@ function openHistory() {
   $("historyModal").classList.add("show");
 }
 
-// ---------- 하교 시간 알림 (이 페이지가 열려 있는 동안) ----------
-async function scheduleAlarm() {
-  if (!state.result) return;
-  if (!("Notification" in window)) { toast("이 브라우저는 알림을 지원하지 않아요"); return; }
-  if ((await Notification.requestPermission()) !== "granted") { toast("알림 권한이 필요해요"); return; }
-  const end = state.result.end_hour;
-  const at = new Date(); at.setHours(end, 0, 0, 0);
-  if (state.day === "내일") at.setDate(at.getDate() + 1);
-  const last = state.result.hourly[state.result.hourly.length - 1];
-  const wait = at - new Date();
-  if (wait <= 0) { toast("하교 시간이 이미 지났어요"); return; }
-  setTimeout(() => new Notification("오늘춥나?? 하교 알림", {
-    body: `${end}시 캠퍼스 체감 ${Math.round(last.feels)}°예요. 겉옷 챙기세요!` }), wait);
-  toast(`${end}시에 알려드릴게요 (이 탭을 열어 두세요)`);
-}
-
 // ---------- 이벤트 ----------
 $("analyzeBtn").onclick = analyze;
 $("campusCard").onclick = analyze;
-$("alarmBtn").onclick = scheduleAlarm;
 $("reportCancel").onclick = () => $("reportModal").classList.remove("show");
 $("reportSubmit").onclick = submitReport;
 $("reportModal").onclick = (e) => { if (e.target.id === "reportModal") $("reportModal").classList.remove("show"); };
