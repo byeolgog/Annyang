@@ -142,6 +142,8 @@
   .xlabels span { flex: 1; max-width: 90px; text-align: center; font-size: 12px; color: var(--sub); }
   .warn { font-size: 12px; color: #b45309; margin-top: 14px; }
   .examples .row { margin-bottom: 18px; }
+  .credit { text-align: center; font-size: 11px; color: var(--faint); padding: 18px 16px 28px; }
+  .credit a { color: inherit; text-decoration: underline; }
   .examples .row > b { font-size: 14px; display: block; margin-bottom: 8px; }
   .prods { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
   .prod img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 10px; background: #f3f6fb; }
@@ -318,13 +320,14 @@
           <ul id="rNotice"></ul>
         </div>
         <div class="card examples">
-          <h3>👀 이런 옷이에요 <span class="muted">쇼핑몰 예시 이미지 · 참고용</span></h3>
+          <h3>👀 이런 옷이에요 <span class="muted">쇼핑몰 검색 링크 · 참고용</span></h3>
           <div id="examples"></div>
         </div>
       </div>
     </div>
   </section>
 </main>
+<footer class="credit">자료 출처: 기상청(기상자료개방포털·API허브), 비상시 <a href="https://open-meteo.com" target="_blank" rel="noopener">Open-Meteo.com</a>(CC BY 4.0) · 교육용 프로토타입이며 예보에 따라 실제와 다를 수 있어요</footer>
 
 <!-- 체감 제보 모달 -->
 <div class="modal-bg" id="reportModal">
